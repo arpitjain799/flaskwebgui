@@ -12,8 +12,13 @@ from threading import Thread
 from dataclasses import dataclass
 from typing import Callable, Any, List, Union, Dict
 from contextlib import suppress
+import keyboard
 
 
+FLASKWEBGUIDIR = os.path.join(tempfile.gettempdir(), "flaskwebgui")
+BROWSER_OPEN_FILEPATH = os.path.join(
+    FLASKWEBGUIDIR, "keep_flaskwebgui_browser_open.txt"
+)
 OPERATING_SYSTEM = platform.system().lower()
 PY = "python3" if OPERATING_SYSTEM in ["linux", "darwin"] else "python"
 
@@ -91,6 +96,17 @@ def find_browser():
     if OPERATING_SYSTEM == "darwin":
         return find_browser_on_mac()
     return None
+
+
+def browser_is_still_running(browser_pid: int = None):
+    return os.path.exists(BROWSER_OPEN_FILEPATH) or psutil.pid_exists(browser_pid)
+
+
+def close_application():
+    if os.path.exists(BROWSER_OPEN_FILEPATH):
+        os.remove(BROWSER_OPEN_FILEPATH)
+    keyboard.press_and_release("ctrl + w")
+    os.kill(os.getpid(), signal.SIGKILL)
 
 
 class BaseDefaultServer:
@@ -197,7 +213,6 @@ class FlaskUI:
                 app=self.app, port=self.port, flask_socketio=self.socketio
             )
 
-        self.profile_dir = os.path.join(tempfile.gettempdir(), "flaskwebgui")
         self.url = f"http://127.0.0.1:{self.port}"
         self.browser_path = self.browser_path or find_browser()
         self.browser_command = self.browser_command or self.get_browser_command()
@@ -209,7 +224,7 @@ class FlaskUI:
     def get_browser_command(self):
         flags = [
             self.browser_path,
-            f"--user-data-dir={self.profile_dir}",
+            f"--user-data-dir={FLASKWEBGUIDIR}",
             "--new-window",
             "--no-first-run",
         ]
@@ -225,7 +240,12 @@ class FlaskUI:
 
     def start_browser(self, server_process: Union[Thread, Process]):
         print("Command:", " ".join(self.browser_command))
-        subprocess.run(self.browser_command)
+        # browser_process = subprocess.run(self.browser_command)
+        # print("Browser closed!!!!!")
+        browser_process = subprocess.Popen(self.browser_command)
+        while browser_is_still_running(browser_process.pid):
+            time.sleep(1)
+        browser_process.kill()
 
         if self.browser_path is None:
             while self.__keyboard_interrupt is False:
@@ -241,6 +261,9 @@ class FlaskUI:
             kill_port(self.port)
 
     def run(self):
+        with open(BROWSER_OPEN_FILEPATH, "w") as f:
+            f.write("True")
+
         if self.on_startup is not None:
             self.on_startup()
 
@@ -262,5 +285,3 @@ class FlaskUI:
         except KeyboardInterrupt:
             self.__keyboard_interrupt = True
             print("Stopped")
-
-        return server_process, browser_thread
